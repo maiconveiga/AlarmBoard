@@ -1,0 +1,245 @@
+/* =========================
+   Tema Johnson Controls — v3 (clean + fixos)
+   ========================= */
+:root{
+  --cyan: #00B8E0;
+  --blue-rl: #0399CC;
+  --blue-usafa: #0554A3;
+  --blue-usaf: #08338F;
+  --green-apple: #7DBA00;
+
+  --bg-app: #f6f8fb;
+  --bg-panel: #ffffff;
+  --text-main: #0b1220;
+  --text-muted: #647084;
+  --line: #e6ebf2;
+
+  --radius: 10px;
+  --shadow: 0 6px 18px rgba(8, 51, 143, 0.06);
+}
+
+/* Layout principal */
+.alarms-container{
+  width: 100vw;
+  height: calc(100vh - 60px); /* ajusta se o menu tiver outra altura */
+  background: var(--bg-app);
+  display: flex;
+  flex-direction: column;
+  align-items: center;   /* centraliza horizontal */
+  justify-content: flex-start; /* toolbar no topo, tabela logo abaixo */
+  overflow: hidden;
+}
+
+/* Toolbar */
+.alarms-toolbar{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-panel);
+  border-bottom: 2px solid var(--cyan);
+  box-shadow: var(--shadow);
+  z-index: 2;
+  flex-wrap: wrap;
+}
+
+.btn-refresh{
+  background: var(--cyan);
+  border: none;
+  color: #fff;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .18s ease, transform .05s ease;
+}
+.btn-refresh:hover{ background: var(--blue-rl); }
+.btn-refresh:active{ transform: translateY(1px); }
+.btn-refresh:disabled{ opacity:.65; cursor:not-allowed; }
+
+.filter-input{
+  min-width: 150px;
+  flex: 1 1 150px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f9fbfe;
+  color: var(--text-main);
+  outline: none;
+  transition: box-shadow .15s ease, border-color .15s ease, background .15s ease;
+}
+.filter-input.small{ min-width: 120px; flex-basis: 120px; }
+.filter-input::placeholder{ color: var(--text-muted); }
+.filter-input:focus{
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px rgba(0,184,224,.18);
+  background: #fff;
+}
+
+.filter-select{
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text-main);
+}
+
+.range-dash{ color: var(--text-muted); }
+
+.status{ color: var(--text-muted); }
+.count{ margin-left: auto; font-weight: 600; color: var(--blue-usafa); }
+
+/* Painel de colunas (mostrar/ocultar) */
+.col-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
+.col-toggle {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background: #fff;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.col-toggle input { margin-right: 4px; }
+
+/* Tabela */
+.alarms-table{
+  width: 100%;
+  max-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin: 12px 0;
+  display: block;
+  max-height: calc(100% - 24px);
+  overflow: auto;
+}
+
+.alarms-table thead th{
+  position: sticky; top: 0;
+  background: var(--blue-usaf);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: .2px;
+  z-index: 3;
+}
+
+.alarms-table thead th:first-child{
+  position: sticky; left: 0;
+  z-index: 4;
+  background: var(--blue-usaf);
+}
+
+.alarms-table tbody td:first-child{
+  position: sticky; left: 0;
+  z-index: 2;
+  background: inherit;
+  box-shadow: 1px 0 0 var(--line);
+}
+
+.alarms-table th, .alarms-table td{
+  padding: 8px 12px;
+  text-align: center;
+  white-space: nowrap;
+  border-right: 1px solid var(--line);
+  height: 42px;
+  font-size: 0.95rem;
+}
+.alarms-table th:last-child, .alarms-table td:last-child{ border-right: 0; }
+
+.alarms-table tbody tr{
+  background: #fff;
+  transition: background .12s ease, box-shadow .12s ease;
+}
+.alarms-table tbody tr:nth-child(even){ background: #f7fbff; }
+
+.alarms-table tbody tr:hover{
+  background: #eef6ff;
+  box-shadow: inset 3px 0 0 0 var(--green-apple);
+}
+
+/* Ordenáveis */
+.sortable{ cursor: pointer; user-select: none; }
+.sortable:hover{ background: var(--blue-usafa); }
+.arrow{ margin-left: 6px; font-size: .9em; opacity: .9; }
+
+/* Colunas de estados mais estreitas */
+.alarms-table th:nth-last-child(-n+2),
+.alarms-table td:nth-last-child(-n+2){ width: 120px; }
+
+/* Botão limpar */
+.btn-clear {
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--text-main);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.btn-clear:hover {
+  background: #f1f5f9;
+  border-color: var(--cyan);
+}
+
+/* fonte mono pro contador do botão */
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+
+/* Toggle Auto */
+.auto-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text-main);
+}
+.auto-toggle input { transform: translateY(1px); }
+
+/* Comentário */
+.comment-cell {
+  min-width: 260px;
+  max-width: 480px;
+}
+.comment-input {
+  width: 100%;
+  min-height: 120px;
+  /* auto-ajuste: JS seta height=scrollHeight; aqui evitamos rolagem e resize manual */
+  resize: none;
+  overflow: hidden;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text-main);
+  font-size: 0.92rem;
+  line-height: 1.25rem;
+  box-sizing: border-box;
+  transition: height .1s ease-out;
+}
+.comment-input:focus {
+  outline: 2px solid rgba(0,184,224,.18);
+  border-color: var(--cyan);
+}
+
+/* Linha destacada quando há comentário */
+.has-comment {
+  background-color: #fff9c4 !important;  /* amarelo suave */
+}
+.has-comment:hover {
+  background-color: #fff59d !important;  /* amarelo um pouco mais forte no hover */
+}

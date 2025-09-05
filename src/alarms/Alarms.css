@@ -2,6 +2,7 @@
    Tema Johnson Controls — v3 (clean + fixos)
    ========================= */
 :root{
+    color-scheme: light;
   --cyan: #00B8E0;
   --blue-rl: #0399CC;
   --blue-usafa: #0554A3;
@@ -19,7 +20,7 @@
 }
 
 /* Layout principal */
-.alarms-container{
+body, .alarms-container{
   width: 100vw;
   height: calc(100vh - 60px); /* ajusta se o menu tiver outra altura */
   background: var(--bg-app);
@@ -28,6 +29,9 @@
   align-items: center;   /* centraliza horizontal */
   justify-content: flex-start; /* toolbar no topo, tabela logo abaixo */
   overflow: hidden;
+  color: var(--text-main);
+  background: var(--bg-app);
+
 }
 
 /* Toolbar */
@@ -242,4 +246,11 @@
 }
 .has-comment:hover {
   background-color: #fff59d !important;  /* amarelo um pouco mais forte no hover */
+}
+
+.col-priority {
+  width: 110px;
+}
+.alarms-table thead th {
+  pointer-events: auto; /* garante que o sticky não bloqueie o click */
 }

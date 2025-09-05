@@ -2,8 +2,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './Alarms.css';
 import {
-  login,
-  getAlarms,
   normalizeValue,
   mapUnit,
   formatDateUTCToLocal,
@@ -11,22 +9,24 @@ import {
 } from '../lib/api';
 
 type Row = {
-  id: string;
+  id: string;            // <- ID COMPOSTO: "<ip>-<id original>"
   dateTimeISO: string;
   dateTime: string;
   site: string;
   point: string;
   value: string;
   unit: string;
+  priority: number;
   reconhecido: 'Sim' | 'Não';
   descartado: 'Sim' | 'Não';
 };
 
 type SortKey =
-  | 'dateTime' | 'site' | 'point' | 'value' | 'unit' | 'reconhecido' | 'descartado';
+  | 'dateTime' | 'site' | 'point' | 'value' | 'unit' | 'priority' | 'reconhecido' | 'descartado';
 type SortDir = 'asc' | 'desc';
 
 // ----- Comentários (localStorage) -----
+// Agora usamos o ID COMPOSTO (com IP) como chave p/ não colidir entre backends.
 const COMMENT_KEY = (id: string) => `alarm_comment_${id}`;
 function loadComment(id: string): string {
   try { return localStorage.getItem(COMMENT_KEY(id)) ?? ''; } catch { return ''; }
@@ -43,6 +43,7 @@ type VisibleCols = {
   point: boolean;
   value: boolean;
   unit: boolean;
+  priority: boolean;
   reconhecido: boolean;
   descartado: boolean;
   comentario: boolean;
@@ -58,6 +59,7 @@ function loadVisibleCols(): VisibleCols {
     point: true,
     value: true,
     unit: true,
+    priority: true,
     reconhecido: true,
     descartado: true,
     comentario: true,
@@ -67,11 +69,55 @@ function saveVisibleCols(cols: VisibleCols) {
   try { localStorage.setItem(COLS_KEY, JSON.stringify(cols)); } catch {}
 }
 
+/* =========================================
+   Dois prefixos de API (proxy do Vite)
+   Ordem: primeiro /api100, depois /api69
+   ========================================= */
+type ApiPrefix = '/api100' | '/api69';
+
+type LoginResponse = { accessToken: string };
+type AlarmsResponse = { total: number; items: AlarmDTO[] };
+
+async function loginP(prefix: ApiPrefix, username: string, password: string): Promise<string> {
+  const res = await fetch(`${prefix}/v3/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Falha no login ${prefix} (${res.status}): ${text || res.statusText}`);
+  }
+  const data = (await res.json()) as LoginResponse;
+  if (!data.accessToken) throw new Error(`Login ${prefix} sem accessToken`);
+  return data.accessToken;
+}
+
+async function getAlarmsP(
+  prefix: ApiPrefix,
+  token: string,
+  opts?: { isAcknowledged?: boolean; isDiscarded?: boolean }
+): Promise<AlarmsResponse> {
+  const params = new URLSearchParams();
+  params.append('pageSize', '500');
+  if (opts?.isAcknowledged !== undefined) params.append('isAcknowledged', String(opts.isAcknowledged));
+  if (opts?.isDiscarded !== undefined)   params.append('isDiscarded', String(opts.isDiscarded));
+
+  const res = await fetch(`${prefix}/v3/alarms/?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Falha ao buscar alarmes ${prefix} (${res.status}): ${text || res.statusText}`);
+  }
+  return (await res.json()) as AlarmsResponse;
+}
+
 export default function Alarms() {
-  const [token, setToken] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
+  const [connectionNote, setConnectionNote] = useState(''); // mostra contagem por origem
 
   // Filtros
   const [fSite, setFSite] = useState('');
@@ -79,6 +125,7 @@ export default function Alarms() {
   const [fValue, setFValue] = useState('');
   const [fDateFrom, setFDateFrom] = useState('');
   const [fDateTo, setFDateTo] = useState('');
+  const [fPriority, setFPriority] = useState('');
   const [fAck, setFAck] = useState<'all' | 'sim' | 'nao'>('all');
   const [fDisc, setFDisc] = useState<'all' | 'sim' | 'nao'>('all');
 
@@ -104,34 +151,74 @@ export default function Alarms() {
     });
   }
 
+  async function fetchFrom(prefix: ApiPrefix, opts: { isAcknowledged?: boolean; isDiscarded?: boolean }) {
+    const token = await loginP(prefix, 'api', 'GMX3-Rel.10');
+    const data = await getAlarmsP(prefix, token, opts);
+    return data.items;
+  }
+
   async function fetchData() {
     setLoading(true);
     setErr('');
+    setConnectionNote('');
     try {
-      const t = await login('api', 'GMX3-Rel.10');
-      setToken(t);
-
       const opts = {
         isAcknowledged: fAck === 'all' ? undefined : fAck === 'sim',
         isDiscarded:   fDisc === 'all' ? undefined : fDisc === 'sim',
       };
 
-      const data = await getAlarms(t, opts);
+      // Ordem: /api100 depois /api69 — juntando resultados
+      const itemsAll: { fromIp: '10.2.1.100' | '10.2.1.69'; item: AlarmDTO }[] = [];
+      const successes: string[] = [];
+      const failures: string[] = [];
+      let c100 = 0, c69 = 0;
 
-      const mapped: Row[] = data.items.map((a: AlarmDTO) => ({
-        id: a.id,
-        dateTimeISO: a.creationTime,
-        dateTime: formatDateUTCToLocal(a.creationTime),
-        site: a.itemReference,
-        point: a.name || a.itemReference,
-        value: normalizeValue(a.triggerValue?.value),
-        unit: mapUnit(a.triggerValue?.units),
-        reconhecido: a.isAcknowledged ? 'Sim' : 'Não',
-        descartado: a.isDiscarded ? 'Sim' : 'Não',
-      }));
+      try {
+        const a100 = await fetchFrom('/api100', opts);
+        c100 = a100.length;
+        itemsAll.push(...a100.map(i => ({ fromIp: '10.2.1.100', item: i })));
+        successes.push('10.2.1.100');
+      } catch (e) {
+        failures.push('10.2.1.100');
+      }
+
+      try {
+        const a69 = await fetchFrom('/api69', opts);
+        c69 = a69.length;
+        itemsAll.push(...a69.map(i => ({ fromIp: '10.2.1.69', item: i })));
+        successes.push('10.2.1.69');
+      } catch (e) {
+        failures.push('10.2.1.69');
+      }
+
+      if (successes.length === 2) {
+        setConnectionNote(`Conectado (100: ${c100} + 69: ${c69})`);
+      } else if (successes.length === 1) {
+        setConnectionNote(`Parcial — ok: ${successes[0]} / falha: ${failures.join(', ')}`);
+      } else {
+        setConnectionNote('Falha nas duas conexões');
+      }
+
+      // Mapeia linhas com ID COMPOSTO
+      const mapped: Row[] = itemsAll.map(({ fromIp, item: a }) => {
+        const composedId = `${fromIp}-${a.id}`;
+        return {
+          id: composedId,
+          dateTimeISO: a.creationTime,
+          dateTime: formatDateUTCToLocal(a.creationTime),
+          site: a.itemReference,
+          point: a.name || a.itemReference,
+          value: normalizeValue(a.triggerValue?.value),
+          unit: mapUnit(a.triggerValue?.units),
+          priority: Number.isFinite(a.priority as unknown as number) ? (a.priority as unknown as number) : 0,
+          reconhecido: a.isAcknowledged ? 'Sim' : 'Não',
+          descartado: a.isDiscarded ? 'Sim' : 'Não',
+        };
+      });
+
       setRows(mapped);
 
-      // Hidrata comentários para os IDs carregados
+      // Hidrata comentários considerando o ID composto
       const nextComments: Record<string, string> = {};
       for (const r of mapped) nextComments[r.id] = loadComment(r.id);
       setComments(nextComments);
@@ -139,11 +226,12 @@ export default function Alarms() {
       setErr(e?.message || 'Erro desconhecido');
     } finally {
       setLoading(false);
-      setSecondsLeft(60); // reinicia contador
+      setSecondsLeft(60);
     }
   }
 
-  useEffect(() => { fetchData(); }, []);
+  // carrega primeira vez
+  useEffect(() => { fetchData(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   // Loop do auto-refresh (1s) com disparo do fetch a cada 60s
   useEffect(() => {
@@ -162,24 +250,28 @@ export default function Alarms() {
     return () => {
       if (intervalRef.current) { window.clearInterval(intervalRef.current); intervalRef.current = null; }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefresh]);
 
   // Limpar filtros (não refaz fetch; limpa filtros locais)
   function clearFilters() {
-    setFSite('');
-    setFPoint('');
-    setFValue('');
-    setFDateFrom('');
-    setFDateTo('');
-    setFAck('all');
-    setFDisc('all');
+    setFSite(''); setFPoint(''); setFValue('');
+    setFDateFrom(''); setFDateTo('');
+    setFPriority('');
+    setFAck('all'); setFDisc('all');
+
+    setSortKey('dateTime');
+    setSortDir('desc');
   }
 
-  // Filtros locais (texto + intervalo de data)
+  // Filtros locais
   const filtered = useMemo(() => {
     const from = fDateFrom ? new Date(`${fDateFrom}T00:00:00`).getTime() : undefined;
     const to   = fDateTo   ? new Date(`${fDateTo}T23:59:59.999`).getTime() : undefined;
     const inc = (h: string, n: string) => h.toLowerCase().includes(n.trim().toLowerCase());
+
+    const priNum = fPriority.trim() !== '' ? Number(fPriority) : undefined;
+    const priIsNum = priNum !== undefined && !Number.isNaN(priNum);
 
     return rows.filter((r) => {
       const passSite  = !fSite || inc(r.site, fSite);
@@ -193,9 +285,16 @@ export default function Alarms() {
       const passAck  = fAck  === 'all' || (fAck  === 'sim' ? r.reconhecido === 'Sim' : r.reconhecido === 'Não');
       const passDisc = fDisc === 'all' || (fDisc === 'sim' ? r.descartado  === 'Sim' : r.descartado  === 'Não');
 
-      return passSite && passPoint && passValue && passFrom && passTo && passAck && passDisc;
+      const passPriority =
+        fPriority.trim() === ''
+          ? true
+          : priIsNum
+            ? r.priority === priNum
+            : String(r.priority).includes(fPriority.trim());
+
+      return passSite && passPoint && passValue && passFrom && passTo && passAck && passDisc && passPriority;
     });
-  }, [rows, fSite, fPoint, fValue, fDateFrom, fDateTo, fAck, fDisc]);
+  }, [rows, fSite, fPoint, fValue, fDateFrom, fDateTo, fAck, fDisc, fPriority]);
 
   // Ordenação
   const sorted = useMemo(() => {
@@ -203,13 +302,17 @@ export default function Alarms() {
     const dir = sortDir === 'asc' ? 1 : -1;
     data.sort((a, b) => {
       switch (sortKey) {
-        case 'dateTime':
-          return (new Date(a.dateTimeISO).getTime() - new Date(b.dateTimeISO).getTime()) * dir;
+        case 'dateTime': {
+          const ta = new Date(a.dateTimeISO).getTime();
+          const tb = new Date(b.dateTimeISO).getTime();
+          return (ta - tb) * dir;
+        }
         case 'site':         return a.site.localeCompare(b.site) * dir;
         case 'point':        return a.point.localeCompare(b.point) * dir;
         case 'unit':         return a.unit.localeCompare(b.unit) * dir;
         case 'reconhecido':  return a.reconhecido.localeCompare(b.reconhecido) * dir;
         case 'descartado':   return a.descartado.localeCompare(b.descartado) * dir;
+        case 'priority':     return (a.priority - b.priority) * dir;
         case 'value': {
           const na = parseFloat(a.value.replace(',', '.'));
           const nb = parseFloat(b.value.replace(',', '.'));
@@ -223,10 +326,12 @@ export default function Alarms() {
   }, [filtered, sortKey, sortDir]);
 
   function onSort(key: SortKey) {
-    setSortKey((prev) => {
-      if (prev === key) { setSortDir((d) => (d === 'asc' ? 'desc' : 'asc')); return prev; }
-      setSortDir('asc'); return key;
-    });
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
   }
 
   const arrow = (key: SortKey) =>
@@ -238,7 +343,6 @@ export default function Alarms() {
       ? `Atualizar alarmes (${secondsLeft}s)`
       : 'Atualizar alarmes';
 
-  // Comentários: handlers
   function handleCommentChange(id: string, value: string) {
     setComments((prev) => ({ ...prev, [id]: value }));
   }
@@ -297,6 +401,14 @@ export default function Alarms() {
           title="Data: Até"
         />
 
+        <input
+          className="filter-input small"
+          placeholder="Prioridade"
+          value={fPriority}
+          onChange={(e) => setFPriority(e.target.value)}
+          title="Prioridade (ex: 0, 1, 2...)"
+        />
+
         <select
           className="filter-select"
           value={fAck}
@@ -321,7 +433,9 @@ export default function Alarms() {
 
         <button onClick={clearFilters} className="btn-clear">Limpar filtros</button>
 
-        <span className="status">{err ? `Erro: ${err}` : token ? 'Conectado' : 'Não autenticado'}</span>
+        <span className="status">
+          {err ? `Erro: ${err}` : connectionNote || '—'}
+        </span>
         <span className="count">Total: {sorted.length}</span>
 
         {/* Controle de colunas */}
@@ -333,6 +447,7 @@ export default function Alarms() {
               ['point', 'Ponto'],
               ['value', 'Valor'],
               ['unit', 'Unidade'],
+              ['priority', 'Prioridade'],
               ['reconhecido', 'Reconhecido'],
               ['descartado', 'Descartado'],
               ['comentario', 'Comentário'],
@@ -354,7 +469,11 @@ export default function Alarms() {
         <thead>
           <tr>
             {visibleCols.dateTime && (
-              <th onClick={() => onSort('dateTime')} className="sortable">
+              <th
+                onClick={() => onSort('dateTime')}
+                className="sortable"
+                aria-sort={sortKey === 'dateTime' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
                 Data - Hora <span className="arrow">{arrow('dateTime')}</span>
               </th>
             )}
@@ -376,6 +495,11 @@ export default function Alarms() {
             {visibleCols.unit && (
               <th onClick={() => onSort('unit')} className="sortable">
                 Unidade <span className="arrow">{arrow('unit')}</span>
+              </th>
+            )}
+            {visibleCols.priority && (
+              <th onClick={() => onSort('priority')} className="sortable col-priority">
+                Prioridade <span className="arrow">{arrow('priority')}</span>
               </th>
             )}
             {visibleCols.reconhecido && (
@@ -401,6 +525,7 @@ export default function Alarms() {
                 {visibleCols.point && <td>{r.point}</td>}
                 {visibleCols.value && <td>{r.value}</td>}
                 {visibleCols.unit && <td>{r.unit}</td>}
+                {visibleCols.priority && <td className="col-priority">{r.priority}</td>}
                 {visibleCols.reconhecido && <td>{r.reconhecido}</td>}
                 {visibleCols.descartado && <td>{r.descartado}</td>}
                 {visibleCols.comentario && (

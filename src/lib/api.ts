@@ -8,6 +8,7 @@ export type AlarmDTO = {
   creationTime: string;  // -> Data - Hora (ISO)
   isAcknowledged: boolean;
   isDiscarded: boolean;
+  priority: number;      // <- NOVO: prioridade
   triggerValue?: { value?: string; units?: string };
 };
 
@@ -49,15 +50,12 @@ export async function getAlarms(
   const res = await fetch(`/api/v3/alarms/${query}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`Falha ao buscar alarmes (${res.status}): ${text || res.statusText}`);
   }
-
   return (await res.json()) as AlarmsResponse;
 }
-
 
 /* Helpers */
 export function normalizeValue(raw?: string): string {
